@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Feature Prioritization Assistant</title>
+  <link rel="stylesheet" href="https://unpkg.com/@tabler/icons-webfont@latest/tabler-icons.min.css" />
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 0 auto; padding: 2rem 1rem; background: #fff; color: #111; }
+    .container { padding: 1.5rem 0; }
+    h1 { font-size: 22px; font-weight: 500; margin-bottom: 0.25rem; }
+    .subtitle { font-size: 14px; color: #666; margin-bottom: 1.5rem; }
+    .section-label { font-size: 13px; color: #666; margin-bottom: 8px; font-weight: 500; }
+    .feature-row { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 32px; gap: 8px; align-items: center; margin-bottom: 8px; }
+    .feature-row input, .feature-row select { width: 100%; padding: 8px; border: 0.5px solid #ccc; border-radius: 8px; font-size: 14px; box-sizing: border-box; }
+    .header-row { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 32px; gap: 8px; margin-bottom: 4px; }
+    .col-header { font-size: 12px; color: #999; }
+    .remove-btn { background: none; border: none; cursor: pointer; color: #999; font-size: 18px; padding: 0; display: flex; align-items: center; justify-content: center; }
+    .remove-btn:hover { color: #c00; }
+    .add-btn { background: none; border: 1px dashed #ccc; border-radius: 8px; padding: 8px 16px; cursor: pointer; font-size: 14px; color: #666; width: 100%; margin-top: 4px; }
+    .add-btn:hover { background: #f5f5f5; }
+    .run-btn { background: #111; color: #fff; border: none; border-radius: 8px; padding: 10px 20px; cursor: pointer; font-size: 14px; font-weight: 500; margin-top: 1.5rem; width: 100%; }
+    .run-btn:hover { background: #333; }
+    .run-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .divider { border: none; border-top: 1px solid #eee; margin: 1.5rem 0; }
+    .result-card { background: #fff; border: 1px solid #eee; border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: 10px; }
+    .result-rank { font-size: 12px; color: #999; margin-bottom: 4px; }
+    .result-name { font-size: 16px; font-weight: 500; margin-bottom: 6px; }
+    .result-scores { display: flex; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+    .score-pill { font-size: 12px; padding: 3px 10px; border-radius: 20px; }
+    .result-rationale { font-size: 14px; color: #555; line-height: 1.6; }
+    .loading-text { font-size: 14px; color: #666; text-align: center; padding: 2rem 0; }
+    .error-text { font-size: 14px; color: #c00; padding: 1rem 0; }
+    .goal-input { width: 100%; margin-bottom: 1rem; box-sizing: border-box; padding: 8px; border: 0.5px solid #ccc; border-radius: 8px; font-size: 14px; }
+    .summary-box { background: #f9f9f9; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; font-size: 14px; color: #444; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Feature Prioritization Assistant</h1>
+    <p class="subtitle">Score your features, then let Claude rank your backlog with strategic rationale.</p>
+
+    <div class="section-label">Product goal or context (optional)</div>
+    <input type="text" class="goal-input" id="goal-input" placeholder="e.g. Increase self-service adoption for small business customers" />
+
+    <div class="header-row">
+      <span class="col-header">Feature</span>
+      <span class="col-header">Impact (1–5)</span>
+      <span class="col-header">Effort (1–5)</span>
+      <span class="col-header">Confidence (1–5)</span>
+      <span></span>
+    </div>
+
+    <div id="features-list"></div>
+    <button class="add-btn" onclick="addFeature()">+ Add feature</button>
+    <button class="run-btn" id="run-btn" onclick="runPrioritization()">Prioritize my backlog</button>
+
+    <hr class="divider" id="results-divider" style="display:none">
+    <div id="results-area"></div>
+  </div>
+
+  <script>
+    let featureCount = 0;
+
+    function addFeature(name = "", impact = 3, effort = 3, confidence = 3) {
+      featureCount++;
+      const id = featureCount;
+      const list = document.getElementById("features-list");
+      const row = document.createElement("div");
+      row.className = "feature-row";
+      row.id = "feature-row-" + id;
+      row.innerHTML = `
+        <input type="text" placeholder="Feature name" value="${name}" id="feat-name-${id}" />
+        <select id="feat-impact-${id}">${[1,2,3,4,5].map(v => `<option value="${v}" ${v==impact?"selected":""}>${v}</option>`).join("")}</select>
+        <select id="feat-effort-${id}">${[1,2,3,4,5].map(v => `<option value="${v}" ${v==effort?"selected":""}>${v}</option>`).join("")}</select>
+        <select id="feat-confidence-${id}">${[1,2,3,4,5].map(v => `<option value="${v}" ${v==confidence?"selected":""}>${v}</option>`).join("")}</select>
+        <button class="remove-btn" onclick="removeFeature(${id})">×</button>
+      `;
+      list.appendChild(row);
+    }
+
+    function removeFeature(id) {
+      const row = document.getElementById("feature-row-" + id);
+      if (row) row.remove();
+    }
+
+    function getFeatures() {
+      const rows = document.querySelectorAll("[id^='feature-row-']");
+      const features = [];
+      rows.forEach(row => {
+        const id = row.id.replace("feature-row-", "");
+        const name = document.getElementById("feat-name-" + id)?.value?.trim();
+        if (!name) return;
+        features.push({
+          name,
+          impact: parseInt(document.getElementById("feat-impact-" + id)?.value || 3),
+          effort: parseInt(document.getElementById("feat-effort-" + id)?.value || 3),
+          confidence: parseInt(document.getElementById("feat-confidence-" + id)?.value || 3),
+        });
+      });
+      return features;
+    }
+
+    async function runPrioritization() {
+      const features = getFeatures();
+      if (features.length < 2) { alert("Please add at least 2 features to prioritize."); return; }
+      const goal = document.getElementById("goal-input")?.value?.trim();
+      const btn = document.getElementById("run-btn");
+      const resultsArea = document.getElementById("results-area");
+      const divider = document.getElementById("results-divider");
+      btn.disabled = true;
+      btn.textContent = "Analyzing...";
+      divider.style.display = "block";
+      resultsArea.innerHTML = '<p class="loading-text">Claude is ranking your features...</p>';
+
+      const featureList = features.map((f, i) =>
+        `${i+1}. "${f.name}" — Impact: ${f.impact}/5, Effort: ${f.effort}/5, Confidence: ${f.confidence}/5`
+      ).join("\n");
+
+      const prompt = `You are a senior product manager helping prioritize a feature backlog.
+${goal ? `Product goal: ${goal}` : ""}
+
+Here are the features with their scores (Impact = business/user value, Effort = implementation cost where lower is easier, Confidence = certainty that impact estimate is correct):
+
+${featureList}
+
+Rank these features from highest to lowest priority. For each, provide a 1-2 sentence rationale explaining the rank based on the scores and any strategic reasoning.
+
+Respond ONLY with valid JSON. No markdown, no backticks, no explanation outside the JSON. Format:
+{
+  "rankedFeatures": [
+    { "name": "feature name", "rank": 1, "impact": 0, "effort": 0, "confidence": 0, "rationale": "your explanation" }
+  ],
+  "summary": "1-2 sentence overall strategic summary"
+}`;
+
+      try {
+        const response = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, messages: [{ role: "user", content: prompt }] })
+        });
+        const data = await response.json();
+        const text = data.content?.map(b => b.text || "").join("").replace(/```json|```/g, "").trim();
+        const parsed = JSON.parse(text);
+        renderResults(parsed);
+      } catch (err) {
+        resultsArea.innerHTML = '<p class="error-text">Something went wrong. Please try again.</p>';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Re-prioritize";
+      }
+    }
+
+    function scoreColor(type, val) {
+      if (type === "impact") { if (val >= 4) return "background:#EAF3DE;color:#3B6D11"; if (val >= 3) return "background:#FAEEDA;color:#854F0B"; return "background:#FCEBEB;color:#A32D2D"; }
+      if (type === "effort") { if (val <= 2) return "background:#EAF3DE;color:#3B6D11"; if (val <= 3) return "background:#FAEEDA;color:#854F0B"; return "background:#FCEBEB;color:#A32D2D"; }
+      return "background:#E6F1FB;color:#185FA5";
+    }
+
+    function renderResults(data) {
+      const resultsArea = document.getElementById("results-area");
+      let html = "";
+      if (data.summary) html += `<div class="summary-box">${data.summary}</div>`;
+      data.rankedFeatures.forEach(f => {
+        html += `<div class="result-card">
+          <div class="result-rank">Priority #${f.rank}</div>
+          <div class="result-name">${f.rank <= 3 ? ["🥇","🥈","🥉"][f.rank-1] + " " : ""}${f.name}</div>
+          <div class="result-scores">
+            <span class="score-pill" style="${scoreColor("impact", f.impact)}">Impact ${f.impact}/5</span>
+            <span class="score-pill" style="${scoreColor("effort", f.effort)}">Effort ${f.effort}/5</span>
+            <span class="score-pill" style="${scoreColor("confidence", f.confidence)}">Confidence ${f.confidence}/5</span>
+          </div>
+          <div class="result-rationale">${f.rationale}</div>
+        </div>`;
+      });
+      resultsArea.innerHTML = html;
+    }
+
+    addFeature("User notifications", 4, 2, 4);
+    addFeature("CSV export", 3, 2, 5);
+    addFeature("Custom dashboards", 5, 5, 3);
+    addFeature("SSO integration", 4, 4, 4);
+  </script>
+</body>
+</html>
